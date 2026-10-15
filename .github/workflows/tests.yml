@@ -44,8 +44,13 @@ jobs:
         run: |
           python -m pip install -r requirements-dev.txt
           python -m pip install --no-deps -e .
+      # pytest-qt imports QtGui at start-up, which needs libEGL; Qt tests only run on Windows,
+      # so the plugin is disabled here and tests/ui is not collected.
       - name: Run tests
-        run: python -m pytest -m "not windows and not ui" --junitxml=test-results/junit-linux.xml
+        run: >
+          python -m pytest -p no:pytest-qt --ignore=tests/ui -m "not windows and not ui"
+          -W "ignore:Unknown config option:pytest.PytestConfigWarning"
+          --junitxml=test-results/junit-linux.xml
       - uses: actions/upload-artifact@v7
         if: always()
         with:
