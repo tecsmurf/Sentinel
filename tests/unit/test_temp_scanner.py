@@ -1,7 +1,6 @@
 import builtins
 import os
 import threading
-from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -16,6 +15,7 @@ from sentinel.scanner.temp_scanner import (
     TempScanner,
     resolve_scan_roots,
 )
+from tests.support import fake_scandir
 
 # Files created by the tests have a real creation time of "now". The scanner clock runs 400
 # days ahead so that modification times set with os.utime decide each file's age.
@@ -163,43 +163,6 @@ class TestLimitsAndCancellation:
         result = scanner().scan_root(tree, cancel=CancelAfter(3))
         assert result.cancelled
         assert 0 < result.snapshot.file_count + result.snapshot.dir_count < 8
-
-
-class _FlakyEntry:
-    """Wraps a real DirEntry and makes stat() raise a chosen error."""
-
-    def __init__(self, entry, error):
-        self._entry = entry
-        self._error = error
-        self.name = entry.name
-        self.path = entry.path
-
-    def is_symlink(self):
-        return self._entry.is_symlink()
-
-    def is_junction(self):
-        return False
-
-    def is_dir(self, *, follow_symlinks=True):
-        return self._entry.is_dir(follow_symlinks=follow_symlinks)
-
-    def stat(self, *, follow_symlinks=True):
-        if self._error is not None:
-            raise self._error
-        return self._entry.stat(follow_symlinks=follow_symlinks)
-
-
-def fake_scandir(deny: set[str] = frozenset(), entry_errors: dict | None = None):
-    entry_errors = entry_errors or {}
-
-    @contextmanager
-    def scandir(path):
-        if Path(path).name in deny:
-            raise PermissionError(13, "Access is denied", path)
-        with os.scandir(path) as iterator:
-            yield [_FlakyEntry(e, entry_errors.get(e.name)) for e in iterator]
-
-    return scandir
 
 
 class TestErrorHandling:
