@@ -1,0 +1,165 @@
+# Sentinel Local — Project Context
+
+> Operational source of truth for continuing development. Update it whenever architecture,
+> implementation status, configuration, dependencies, or workflow change materially.
+> Architectural reasoning lives in [DECISIONS.md](DECISIONS.md); this file describes **state**.
+>
+> Status vocabulary: **planned** (designed, no code), **implemented** (code exists),
+> **tested** (automated tests pass), **verified on Windows** (exercised on a real Windows
+> machine), **known-broken**.
+
+Last updated: 2026-10-15 — Phase 0 (audit and documentation).
+
+## 1. Project identity
+
+- **Name:** Sentinel Local
+- **Purpose:** A local-first Windows desktop application that monitors Windows Event Logs and
+  configured application log files, analyses temporary-directory storage and growth, detects
+  meaningful patterns (repeated errors, crashes, service failures, bursts, abnormal growth),
+  correlates them into investigation timelines, and explains findings with evidence and safe
+  recommendations.
+- **Problem solved:** Diagnosing "my PC is acting up / filling up" on Windows means manually
+  combing Event Viewer, scattered log files, and temp folders. Sentinel Local gathers the
+  evidence, keeps a searchable history, and points at what changed — without sending data
+  anywhere.
+- **Target OS:** Windows 10/11 (x64). Analysis, parsing, storage and the temp scanner are
+  platform-neutral so they can be tested on any OS.
+- **Intended users:** power users, developers, support engineers, and IT staff investigating a
+  single Windows machine.
+- **Core principles:** collect, analyse, and store locally; evidence before conclusions;
+  read-only by default; least privilege; bounded resource use; honest reporting of gaps
+  (inaccessible sources, dropped events, partial scans).
+
+## 2. Repository audit (2026-10-15)
+
+- Local repository: initialised, branch `master`, **no commits, no files**.
+- Remote: none was configured. The owner confirmed adding
+  `origin = https://github.com/tecsmurf/Sentinel.git` (public, empty, no branches) and pushing
+  to `master`.
+- No existing code, tests, dependency manifests, CI, or documentation — the project is built
+  from scratch following the specification.
+- Development machine: Windows 11 Home (10.0.26200), Python 3.12.10 and 3.14.4 available,
+  `uv` 0.11.32, `gh` 2.102.0.
+
+## 3. Architecture (planned)
+
+Layered, one-directional dependencies (see D-007):
+
+```
+ui  ──►  services  ──►  collectors / scanner / analysis / storage  ──►  models
+```
+
+Planned layout (`src/` layout, D-018):
+
+```
+src/sentinel/
+├── __init__.py, __main__.py, main.py   entry points (GUI + headless CLI)
+├── config.py          typed configuration, JSON persistence, validation, defaults
+├── paths.py           app-data location, env-var expansion, path normalisation
+├── logging_config.py  structured (JSON-lines) application logging with rotation
+├── models.py          shared dataclasses/enums: Observation, Finding, Incident, ...
+├── collectors/        windows_events.py, text_logs.py, file_watcher.py
+├── scanner/           temp_scanner.py, snapshots.py, classification.py
+├── analysis/          parser.py, rules.py, correlation.py, recommendations.py
+├── storage/           database.py (schema/migrations), repository.py
+├── services/          monitoring.py, scan_service.py, report_service.py
+└── ui/                main_window.py, dashboard.py, events_view.py, files_view.py,
+                       incidents_view.py, scan_view.py, settings_view.py, reports_view.py
+tests/  unit/  integration/  windows/  fixtures/
+```
+
+### Data flow (planned)
+
+1. Collectors (Event Log channels, text-log tailers) run on worker threads and push normalised
+   `Observation`s into a bounded queue (backpressure, counted drops — D-008).
+2. A single writer thread batches observations into SQLite and advances collector
+   checkpoints in the same transaction.
+3. The temp scanner runs on demand (cancellable, iterative, no reparse-point traversal) and
+   stores per-root and per-subdirectory aggregates plus bounded per-file samples.
+4. The analysis service periodically runs deterministic rules over recent data, upserts
+   findings (with deduplication/suppression), correlates findings into incidents, and attaches
+   labelled hypotheses.
+5. The UI reads through its own SQLite connection and receives worker progress via Qt signals.
+
+### Storage (planned)
+
+SQLite (WAL, `PRAGMA user_version` migrations). Timestamps are UTC, stored as integer
+microseconds since the Unix epoch; displayed in local time. Tables: `observations`,
+`checkpoints`, `scan_runs`, `root_snapshots`, `dir_snapshots`, `file_samples`,
+`metric_samples`, `findings`, `finding_evidence`, `incidents`, `hypotheses`, `suppressions`.
+
+## 4. Product requirements (summary)
+
+Real-time monitoring and on-demand scans; Windows Event Log support (Application, System, and
+user-selected channels); configurable text-log monitoring (`.log`, `.txt`, JSON lines) with
+rotation/truncation handling and checkpoints; temp-directory analysis and growth tracking;
+repeated-error, crash, service-failure, burst, log-growth, temp-growth, co-occurring-error,
+and collector-health rules; correlation into incidents; searchable local history; JSON,
+Markdown, and HTML reports with optional redaction; safe, explained cleanup candidates
+(no deletion).
+
+## 5. Security and privacy
+
+- Local-only storage; no telemetry; no network access needed; no external AI API.
+- Runs as the current user; never self-elevates; access-denied is reported, not hidden.
+- Log content and file names are treated as sensitive and as untrusted data: parsed with
+  bounded sizes, never executed, never used to build shell commands; HTML exports escape all
+  content.
+- Parameterised SQL only.
+- Read-only toward the filesystem and the OS (no deletion, no service/registry/process
+  changes, no event-log modification) — D-011.
+- Retention limits on observations, scan history, and metrics — D-014.
+- Exports support redaction of usernames in paths, computer names, email addresses, IP
+  addresses, and SIDs.
+
+## 6. Current project state
+
+| Area | Status |
+|------|--------|
+| Documentation (README, CONTEXT, DECISIONS) | implemented |
+| Configuration, logging, paths | planned |
+| SQLite storage and repository | planned |
+| Temp-directory scanner and snapshots | planned |
+| Text-log parsing and tailing | planned |
+| Windows Event Log collector | planned |
+| Monitoring pipeline (queue, writer) | planned |
+| Detection rules and correlation | planned |
+| Reports | planned |
+| Headless CLI | planned |
+| Desktop UI | planned |
+| CI workflow | planned |
+| Packaging (PyInstaller) | planned (deferred, D-016) |
+
+- **Known bugs:** none (no code yet).
+- **Test results:** no tests yet.
+- **Unresolved technical decisions:** whether to use SQLite FTS5 for message search (start
+  with indexed `LIKE` queries; revisit if search on large databases is slow).
+- **Current phase:** Phase 0 — audit and documentation.
+- **Next three tasks:**
+  1. Add `pyproject.toml`, pinned requirements, ruff/pytest configuration, and CI.
+  2. Implement configuration, paths, and structured logging with tests.
+  3. Implement the SQLite schema, migrations, and repository with tests.
+
+## 7. Development workflow
+
+### Environment
+
+- Python **3.12** (validated: 3.12.10). The repository lives in a OneDrive-synced folder on the
+  original development machine, so the development virtual environment was created outside it
+  (`%USERPROFILE%\.venvs\sentinel-local`) to avoid syncing ~300 MB of binaries. A conventional
+  `.venv` in the repository also works and is git-ignored.
+
+### Git policy (D-017)
+
+- Branch `master`, remote `origin` → `https://github.com/tecsmurf/Sentinel.git`.
+- Small logical changes; each one linted, tested, staged selectively, reviewed as a staged
+  diff, committed with a conventional commit message, and pushed before starting the next.
+- No pull requests, no force pushes, no history rewriting, no committing of databases, logs,
+  virtual environments, build output, or secrets.
+
+### Code-quality standards
+
+- `ruff` for linting and formatting; `pytest` for tests.
+- Type hints on public functions; dataclasses for value types; no bare `except`.
+- Exceptions isolated per source/collector; errors reported, never swallowed silently.
+- Regression test for every bug fix.
