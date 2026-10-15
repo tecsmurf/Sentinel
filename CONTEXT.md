@@ -131,7 +131,8 @@ Markdown, and HTML reports with optional redaction; safe, explained cleanup cand
 | Shared models (`models.py`), fingerprints/message bounding (`analysis/normalize.py`) | implemented, tested (unit) |
 | SQLite storage: schema v1, migrations, repository for observations, checkpoints, metrics, scans | implemented, tested (integration) |
 | Repository methods for findings, incidents, hypotheses, suppressions, retention | planned |
-| Temp-directory scanner and snapshots | planned |
+| Temp-directory scanner (`scanner/temp_scanner.py`, `scanner/classification.py`): root resolution/dedup, iterative read-only traversal, reparse points skipped, limits, cancellation, progress, candidates with reasons | implemented, tested (unit + Windows: junctions, ACL denial, locked files, 8.3 names) |
+| Scan persistence and growth comparison between scans | planned |
 | Text-log parsing and tailing | planned |
 | Windows Event Log collector | planned |
 | Monitoring pipeline (queue, writer) | planned |
