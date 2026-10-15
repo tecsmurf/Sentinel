@@ -117,7 +117,7 @@ Markdown, and HTML reports with optional redaction; safe, explained cleanup cand
 | Area | Status |
 |------|--------|
 | Documentation (README, CONTEXT, DECISIONS) | implemented |
-| Configuration, logging, paths | planned |
+| Configuration (`config.py`), paths (`paths.py`), structured logging (`logging_config.py`) | implemented, tested (unit) |
 | SQLite storage and repository | planned |
 | Temp-directory scanner and snapshots | planned |
 | Text-log parsing and tailing | planned |
