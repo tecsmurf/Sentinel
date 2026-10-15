@@ -81,12 +81,22 @@ tests/  unit/  integration/  windows/  fixtures/
    labelled hypotheses.
 5. The UI reads through its own SQLite connection and receives worker progress via Qt signals.
 
-### Storage (planned)
+### Storage (implemented — `storage/database.py`, `storage/repository.py`)
 
-SQLite (WAL, `PRAGMA user_version` migrations). Timestamps are UTC, stored as integer
-microseconds since the Unix epoch; displayed in local time. Tables: `observations`,
-`checkpoints`, `scan_runs`, `root_snapshots`, `dir_snapshots`, `file_samples`,
-`metric_samples`, `findings`, `finding_evidence`, `incidents`, `hypotheses`, `suppressions`.
+- SQLite file `sentinel.db` in the data directory. WAL journaling, `synchronous=NORMAL`,
+  `foreign_keys=ON`, `auto_vacuum=INCREMENTAL` (set at creation).
+- Connections use autocommit mode; writes go through `transaction()` (`BEGIN IMMEDIATE`).
+  One `Repository` per thread/connection.
+- Schema version in `PRAGMA user_version` (currently **1**). `MIGRATIONS` in `database.py` is
+  append-only; a database from a newer version is refused with a clear `DatabaseError`, as is
+  a corrupt/foreign file.
+- Timestamps: UTC, INTEGER microseconds since the Unix epoch (`models.to_micros`).
+- Tables: `observations` (unique `dedup_key`, indexes on time, severity+time, source+time,
+  fingerprint+time), `checkpoints`, `metric_samples`, `scan_runs`, `root_snapshots`,
+  `dir_snapshots`, `file_samples`, `findings`, `finding_evidence`, `incidents`, `hypotheses`,
+  `suppressions`. The finding/incident tables exist in schema v1; their repository methods
+  arrive with the detection engine.
+- Search uses `LIKE … ESCAPE '\'` with wildcards escaped (no FTS yet).
 
 ## 4. Product requirements (summary)
 
@@ -118,7 +128,9 @@ Markdown, and HTML reports with optional redaction; safe, explained cleanup cand
 |------|--------|
 | Documentation (README, CONTEXT, DECISIONS) | implemented |
 | Configuration (`config.py`), paths (`paths.py`), structured logging (`logging_config.py`) | implemented, tested (unit) |
-| SQLite storage and repository | planned |
+| Shared models (`models.py`), fingerprints/message bounding (`analysis/normalize.py`) | implemented, tested (unit) |
+| SQLite storage: schema v1, migrations, repository for observations, checkpoints, metrics, scans | implemented, tested (integration) |
+| Repository methods for findings, incidents, hypotheses, suppressions, retention | planned |
 | Temp-directory scanner and snapshots | planned |
 | Text-log parsing and tailing | planned |
 | Windows Event Log collector | planned |
@@ -137,9 +149,10 @@ Markdown, and HTML reports with optional redaction; safe, explained cleanup cand
   with indexed `LIKE` queries; revisit if search on large databases is slow).
 - **Current phase:** Phase 0 — audit and documentation.
 - **Next three tasks:**
-  1. Implement configuration, paths, and structured logging with tests.
-  2. Implement shared models and the SQLite schema, migrations, and repository with tests.
-  3. Implement the read-only temp-directory scanner with tests.
+  1. Implement the read-only temp-directory scanner (iterative, cancellable, no reparse-point
+     traversal) with tests.
+  2. Persist scan snapshots and compare growth between scans.
+  3. Implement text-log parsing and incremental tailing with rotation handling.
 
 ## 7. Development workflow
 

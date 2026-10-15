@@ -54,12 +54,18 @@ select = [
     "S",    # bandit security checks
 ]
 
+[tool.ruff.lint.isort]
+known-first-party = ["sentinel", "tests"]
+
 [tool.ruff.lint.per-file-ignores]
 # Tests use bare asserts and synthetic data written to temporary directories.
 "tests/**" = ["S101", "S108"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The repository root is on sys.path so tests can import shared helpers from tests.support;
+# the application itself is always imported from the installed package (src layout).
+pythonpath = ["."]
 addopts = "-ra --strict-markers"
 qt_api = "pyside6"
 markers = [
