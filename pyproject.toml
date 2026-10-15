@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sentinel-local"
+version = "0.1.0"
+description = "Local-first Windows system intelligence: event-log and log-file monitoring, temp-directory analysis, and evidence-based findings."
+readme = "README.md"
+requires-python = ">=3.12"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: Microsoft :: Windows",
+    "Environment :: Win32 (MS Windows)",
+    "Topic :: System :: Monitoring",
+]
+# Version ranges are the ones validated in this repository; exact pins live in requirements*.txt.
+dependencies = [
+    "PySide6-Essentials>=6.8,<6.13",
+    "pywin32>=306; sys_platform == 'win32'",
+    "watchdog>=4.0,<7",
+    "psutil>=5.9,<8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-qt>=4.4",
+    "ruff>=0.15",
+]
+build = [
+    "pyinstaller>=6.10",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # import sorting
+    "B",    # bugbear
+    "UP",   # pyupgrade
+    "SIM",  # simplifications
+    "RUF",  # ruff-specific
+    "S",    # bandit security checks
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests use bare asserts and synthetic data written to temporary directories.
+"tests/**" = ["S101", "S108"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+qt_api = "pyside6"
+markers = [
+    "windows: needs the real Windows API (read-only); skipped on other platforms",
+    "ui: needs a Qt GUI platform (run with QT_QPA_PLATFORM=offscreen in CI)",
+]

@@ -127,7 +127,8 @@ Markdown, and HTML reports with optional redaction; safe, explained cleanup cand
 | Reports | planned |
 | Headless CLI | planned |
 | Desktop UI | planned |
-| CI workflow | planned |
+| Build tooling (pyproject, pins, ruff, pytest) | implemented, tested locally |
+| CI workflow | implemented (first run pending) |
 | Packaging (PyInstaller) | planned (deferred, D-016) |
 
 - **Known bugs:** none (no code yet).
@@ -136,9 +137,9 @@ Markdown, and HTML reports with optional redaction; safe, explained cleanup cand
   with indexed `LIKE` queries; revisit if search on large databases is slow).
 - **Current phase:** Phase 0 — audit and documentation.
 - **Next three tasks:**
-  1. Add `pyproject.toml`, pinned requirements, ruff/pytest configuration, and CI.
-  2. Implement configuration, paths, and structured logging with tests.
-  3. Implement the SQLite schema, migrations, and repository with tests.
+  1. Implement configuration, paths, and structured logging with tests.
+  2. Implement shared models and the SQLite schema, migrations, and repository with tests.
+  3. Implement the read-only temp-directory scanner with tests.
 
 ## 7. Development workflow
 
@@ -148,6 +149,43 @@ Markdown, and HTML reports with optional redaction; safe, explained cleanup cand
   original development machine, so the development virtual environment was created outside it
   (`%USERPROFILE%\.venvs\sentinel-local`) to avoid syncing ~300 MB of binaries. A conventional
   `.venv` in the repository also works and is git-ignored.
+
+### Dependencies
+
+`pyproject.toml` declares compatible ranges; `requirements.txt` (runtime) and
+`requirements-dev.txt` (runtime + dev tools) hold exact pins generated with
+`uv pip compile --universal` (the command is recorded in each file's header).
+
+| Package | Pinned | Purpose |
+|---------|--------|---------|
+| PySide6-Essentials | 6.12.0 | Desktop UI (Qt Core/Gui/Widgets only) |
+| pywin32 | 312 (Windows only) | Windows Event Log API (`win32evtlog`) |
+| watchdog | 6.0.0 | Filesystem notifications for monitored log files |
+| psutil | 7.2.2 | Own-process resource usage and system context (boot time) |
+| pytest / pytest-qt | 9.1.1 / 4.5.0 | Tests, Qt widget tests |
+| ruff | 0.17.0 | Lint + format |
+| pyinstaller (extra `build`) | 6.22.3 validated | Packaging (deferred, D-016) |
+
+### Setup, test, lint
+
+```powershell
+py -3.12 -m venv .venv                     # or: uv venv --python 3.12 .venv
+.venv\Scripts\python -m pip install -r requirements-dev.txt
+.venv\Scripts\python -m pip install --no-deps -e .
+.venv\Scripts\python -m pytest             # full suite
+.venv\Scripts\python -m pytest -m "not windows and not ui"   # platform-neutral subset
+.venv\Scripts\python -m ruff check . ; .venv\Scripts\python -m ruff format --check .
+```
+
+Test markers: `windows` (real Windows API, read-only) and `ui` (needs a Qt platform; set
+`QT_QPA_PLATFORM=offscreen` for headless runs).
+
+### Continuous integration
+
+`.github/workflows/tests.yml` runs on pushes to `master`: ruff lint/format (Ubuntu),
+platform-neutral tests (Ubuntu), and the full suite including Windows-API and Qt tests
+(`windows-latest`, offscreen Qt). JUnit XML results are uploaded as artifacts. No secrets,
+no deployment, no releases.
 
 ### Git policy (D-017)
 
