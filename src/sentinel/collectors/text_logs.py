@@ -42,11 +42,14 @@ from typing import Any, BinaryIO
 
 from sentinel.analysis.normalize import fingerprint, prepare_message
 from sentinel.analysis.parser import RecordParser
+from sentinel.collectors.base import HealthNote
 from sentinel.config import MonitoringSettings, TextLogSource
 from sentinel.models import Observation, Severity, SourceType, utc_now
 from sentinel.paths import PathError, canonical_key, expand_path
 
 logger = logging.getLogger(__name__)
+
+__all__ = ["FileState", "HealthNote", "TailResult", "TailSettings", "TextLogCollector"]
 
 HEAD_BYTES = 1024
 MAX_FILES_PER_SOURCE = 200
@@ -80,15 +83,6 @@ class TailSettings:
         """Byte cap for one line or pending record; always fits twice in a read window."""
         limit = max(256, min(self.max_line_bytes, self.max_read_bytes // 2))
         return limit - limit % 2  # keep UTF-16 code units whole
-
-
-@dataclass(slots=True)
-class HealthNote:
-    kind: str
-    severity: Severity
-    message: str
-    path: str = ""
-    count: int = 1
 
 
 @dataclass(slots=True)

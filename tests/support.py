@@ -77,3 +77,49 @@ def fake_scandir(deny: frozenset[str] | set[str] = frozenset(), entry_errors: di
             yield [FlakyEntry(entry, errors.get(entry.name)) for entry in iterator]
 
     return scandir
+
+
+# --------------------------------------------------------------------------------------
+# Synthetic Windows events (modelled on real Application/System channel XML)
+# --------------------------------------------------------------------------------------
+
+_EVENT_NS = "http://schemas.microsoft.com/win/2004/08/events/event"
+
+
+def event_xml(
+    *,
+    provider: str,
+    event_id: int,
+    record_id: int,
+    when: datetime,
+    level: int = 2,
+    channel: str = "Application",
+    data: dict[str, str] | list[str] | None = None,
+    user_data: dict[str, str] | None = None,
+    process_id: int = 1234,
+) -> str:
+    """Build event XML in the shape produced by EvtRender (values are XML-escaped)."""
+    from xml.sax.saxutils import escape, quoteattr
+
+    stamp = when.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f") + "0Z"
+    if isinstance(data, dict):
+        items = "".join(f"<Data Name={quoteattr(k)}>{escape(v)}</Data>" for k, v in data.items())
+        payload = f"<EventData>{items}</EventData>"
+    elif isinstance(data, list):
+        payload = (
+            "<EventData>" + "".join(f"<Data>{escape(v)}</Data>" for v in data) + "</EventData>"
+        )
+    elif user_data is not None:
+        inner = "".join(f"<{k}>{escape(v)}</{k}>" for k, v in user_data.items())
+        payload = f"<UserData><Info xmlns='urn:test'>{inner}</Info></UserData>"
+    else:
+        payload = ""
+    return (
+        f"<Event xmlns='{_EVENT_NS}'><System><Provider Name={quoteattr(provider)}/>"
+        f"<EventID>{event_id}</EventID><Version>0</Version><Level>{level}</Level><Task>0</Task>"
+        f"<Opcode>0</Opcode><Keywords>0x80000000000000</Keywords>"
+        f"<TimeCreated SystemTime='{stamp}'/><EventRecordID>{record_id}</EventRecordID>"
+        f"<Correlation/><Execution ProcessID='{process_id}' ThreadID='0'/>"
+        f"<Channel>{escape(channel)}</Channel><Computer>TEST-PC</Computer>"
+        f"<Security UserID='S-1-5-18'/></System>{payload}</Event>"
+    )

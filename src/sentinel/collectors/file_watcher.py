@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
-from sentinel.collectors.text_logs import HealthNote
+from sentinel.collectors.base import HealthNote
 from sentinel.config import TextLogSource
 from sentinel.models import Severity
 from sentinel.paths import PathError, expand_path
