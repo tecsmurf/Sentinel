@@ -134,7 +134,7 @@ Markdown, and HTML reports with optional redaction; safe, explained cleanup cand
 | Temp-directory scanner (`scanner/temp_scanner.py`, `scanner/classification.py`): root resolution/dedup, iterative read-only traversal, reparse points skipped, limits, cancellation, progress, candidates with reasons | implemented, tested (unit + Windows: junctions, ACL denial, locked files, 8.3 names) |
 | Scan persistence and growth comparison (`scanner/snapshots.py`, `services/scan_service.py`): one scan run per multi-root scan, complete-only baselines, per-subfolder changes, caveats | implemented, tested (unit + integration) |
 | Text-log parsing (`analysis/parser.py`) and incremental tailing (`collectors/text_logs.py`): checkpoints, partial lines, multiline, rotation/truncation/rewrite detection, backfill limit, BOM/UTF-16/legacy encodings, shared-delete opens on Windows | implemented, tested (unit + integration + Windows) |
-| File watching + periodic reconciliation | planned |
+| File watching (`collectors/file_watcher.py`, watchdog) as a low-latency trigger; reconciliation by the monitoring service | watcher implemented, tested (integration, real observers); reconciliation planned with the pipeline |
 | Windows Event Log collector | planned |
 | Monitoring pipeline (queue, writer) | planned |
 | Detection rules and correlation | planned |
