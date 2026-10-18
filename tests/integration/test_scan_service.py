@@ -1,13 +1,14 @@
 import threading
+from datetime import timedelta
 
 import pytest
 
 from sentinel.config import TempScanSettings
-from sentinel.models import ScanStatus
+from sentinel.models import ScanStatus, utc_now
 from sentinel.scanner.temp_scanner import ScanLimits, TempScanner
 from sentinel.services.scan_service import ScanService
 from sentinel.storage import Repository
-from tests.support import fake_scandir
+from tests.support import backdate, fake_scandir
 
 
 @pytest.fixture
@@ -16,6 +17,10 @@ def temp_root(tmp_path):
     (root / "cache").mkdir(parents=True)
     (root / "cache" / "a.tmp").write_bytes(b"x" * 1000)
     (root / "b.log").write_bytes(b"x" * 200)
+    # Pre-existing files: make sure they predate the first scan regardless of clock tick size.
+    an_hour_ago = utc_now() - timedelta(hours=1)
+    backdate(root / "cache" / "a.tmp", an_hour_ago)
+    backdate(root / "b.log", an_hour_ago)
     return root
 
 
