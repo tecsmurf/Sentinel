@@ -18,6 +18,7 @@ Timestamps without a zone are interpreted in the machine's local time zone.
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -128,6 +129,16 @@ class RecordParser:
     # ------------------------------------------------------------------ public API
 
     def parse(self, text: str) -> ParsedRecord:
+        """Parse one record. Never raises: unexpected failures yield ``parse_error``."""
+        try:
+            return self._parse(text)
+        except (ValueError, OverflowError, RecursionError, TypeError) as exc:
+            return ParsedRecord(
+                message=text.strip(),
+                parse_error=f"record could not be parsed ({type(exc).__name__})",
+            )
+
+    def _parse(self, text: str) -> ParsedRecord:
         stripped = text.strip()
         if self.fmt == "json" or (self.fmt == "auto" and stripped.startswith("{")):
             record = self._parse_json(stripped)
@@ -332,7 +343,12 @@ class RecordParser:
             return None
         if isinstance(value, int | float):
             # Epoch value: infer the unit from its magnitude (seconds up to year ~5138).
-            number = float(value)
+            try:
+                number = float(value)  # huge JSON integers overflow here
+            except OverflowError:
+                return None
+            if not math.isfinite(number):  # json.loads accepts NaN and Infinity
+                return None
             if number >= 1e17:
                 seconds = number / 1e9  # nanoseconds
             elif number >= 1e14:

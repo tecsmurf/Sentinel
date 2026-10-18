@@ -150,6 +150,21 @@ class TestJson:
         assert record.parse_error == "line is not a valid JSON object"
         assert record.severity is Severity.ERROR
 
+    @pytest.mark.parametrize(
+        "raw_time",
+        ["10" + "0" * 400, "1e400", "NaN", "Infinity", "-Infinity", "-1e30"],
+    )
+    def test_hostile_epoch_values_do_not_raise(self, raw_time):
+        # Regression: float() of a huge JSON integer raised OverflowError outside the guard.
+        record = parser().parse(f'{{"time": {raw_time}, "msg": "x", "level": "error"}}')
+        assert record.timestamp is None
+        assert record.message == "x"
+        assert record.severity is Severity.ERROR
+
+    def test_deeply_nested_json_does_not_raise(self):
+        record = parser().parse("[" * 100_000 + "]" * 100_000)
+        assert record.parse_error is None or "could not be parsed" in record.parse_error
+
     def test_brace_line_in_auto_mode_falls_back_silently(self):
         record = parser().parse("{not json} ERROR x")
         assert record.parse_error is None
