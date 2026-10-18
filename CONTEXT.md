@@ -130,7 +130,7 @@ Markdown, and HTML reports with optional redaction; safe, explained cleanup cand
 | Configuration (`config.py`), paths (`paths.py`), structured logging (`logging_config.py`) | implemented, tested (unit) |
 | Shared models (`models.py`), fingerprints/message bounding (`analysis/normalize.py`) | implemented, tested (unit) |
 | SQLite storage: schema v1, migrations, repository for observations, checkpoints, metrics, scans | implemented, tested (integration) |
-| Repository methods for findings, incidents, hypotheses, suppressions, retention | planned |
+| Findings/incidents/hypotheses/suppressions persistence (`storage/findings.py`) and retention (`storage/retention.py`: age + row cap, evidence and scan baselines protected, incremental vacuum) | implemented, tested (integration) |
 | Temp-directory scanner (`scanner/temp_scanner.py`, `scanner/classification.py`): root resolution/dedup, iterative read-only traversal, reparse points skipped, limits, cancellation, progress, candidates with reasons | implemented, tested (unit + Windows: junctions, ACL denial, locked files, 8.3 names) |
 | Scan persistence and growth comparison (`scanner/snapshots.py`, `services/scan_service.py`): one scan run per multi-root scan, complete-only baselines, per-subfolder changes, caveats | implemented, tested (unit + integration) |
 | Text-log parsing (`analysis/parser.py`) and incremental tailing (`collectors/text_logs.py`): checkpoints, partial lines, multiline, rotation/truncation/rewrite detection, backfill limit, BOM/UTF-16/legacy encodings, shared-delete opens on Windows | implemented, tested (unit + integration + Windows) |

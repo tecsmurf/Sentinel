@@ -7,7 +7,6 @@ user-supplied values only ever travel as bound parameters.
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 from collections.abc import Iterable, Sequence
@@ -16,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from sentinel.config import RetentionSettings
 from sentinel.models import (
     DirSnapshot,
     FileSample,
@@ -30,33 +30,17 @@ from sentinel.models import (
     to_micros,
     utc_now,
 )
+from sentinel.storage.codec import dumps as _dumps
+from sentinel.storage.codec import loads as _loads
+from sentinel.storage.codec import micros as _micros
+from sentinel.storage.codec import moment as _moment
 from sentinel.storage.database import connect, transaction
+from sentinel.storage.findings import FindingsMixin
+from sentinel.storage.retention import RetentionResult, apply_retention
 
 logger = logging.getLogger(__name__)
 
 _MAX_IDS_PER_QUERY = 500
-
-
-def _dumps(value: Any) -> str:
-    return json.dumps(value, default=str, ensure_ascii=False, separators=(",", ":"))
-
-
-def _loads(text: str | None, fallback: Any) -> Any:
-    if not text:
-        return fallback
-    try:
-        return json.loads(text)
-    except (TypeError, ValueError):
-        logger.warning("ignored unreadable JSON column value")
-        return fallback
-
-
-def _micros(moment: datetime | None) -> int | None:
-    return None if moment is None else to_micros(moment)
-
-
-def _moment(micros: int | None) -> datetime | None:
-    return None if micros is None else from_micros(micros)
 
 
 def escape_like(text: str) -> str:
@@ -152,7 +136,7 @@ def _row_to_observation(row: sqlite3.Row) -> Observation:
     )
 
 
-class Repository:
+class Repository(FindingsMixin):
     """Data access for one connection. Create one repository per thread."""
 
     def __init__(self, conn: sqlite3.Connection) -> None:
@@ -550,3 +534,17 @@ class Repository:
             )
             for row in rows
         ]
+
+    # ----------------------------------------------------------------------------------
+    # Retention
+    # ----------------------------------------------------------------------------------
+
+    def apply_retention(
+        self, settings: RetentionSettings, now: datetime | None = None
+    ) -> RetentionResult:
+        """Delete expired data (evidence of retained findings is kept) and reclaim space."""
+        with self.transaction():
+            result = apply_retention(self.conn, settings, now or utc_now())
+        if result.total:
+            self.conn.execute("PRAGMA incremental_vacuum").fetchall()
+        return result
