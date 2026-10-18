@@ -34,6 +34,7 @@ Rules for maintaining this file:
 | D-017 | Small, verified commits pushed directly to the working branch | accepted |
 | D-018 | `src/` package layout with a single `sentinel` package | accepted |
 | D-019 | Text logs: shared-delete opens, bounded backfill, generations for rotation | accepted |
+| D-020 | Backpressure by not advancing checkpoints; epochs after failed writes | accepted |
 
 ---
 
@@ -476,3 +477,33 @@ Rules for maintaining this file:
   encoding, and pending-record state per file.
 - **Revisit when:** reading rotated predecessor files (`app.log.1`) to close the rotation gap
   becomes a requirement.
+
+## D-020 — Backpressure by not advancing checkpoints; epochs after failed writes
+
+- **Date:** 2026-10-18
+- **Status:** accepted
+- **Context and problem:** D-008 requires bounded queues and backpressure, and that any
+  dropped data is reported. Both collectors are pull-based and checkpointed (text-log byte
+  offsets, Event Log record IDs), so data that is not yet persisted can always be read again.
+  A naive design that advances checkpoints when data is *read* would lose data whenever the
+  queue is full or a database write fails.
+- **Options considered:** drop and count when the queue is full; block producers
+  indefinitely; advance working checkpoints only when a batch is accepted by the queue, and
+  rewind to the last committed checkpoints after a failed write.
+- **Decision:** A worker advances its working checkpoints only when the writer queue accepts
+  the batch. When the queue is full (after `enqueue_timeout_seconds`) the batch is discarded,
+  checkpoints stay put, an `ingestion_delayed` health warning is recorded (rate-limited), and
+  the worker retries shortly — re-reading the same data. If a database write fails, the
+  pipeline restores the last *committed* checkpoints and increments an epoch counter; batches
+  stamped with an older epoch are discarded both when offered and when dequeued, closing the
+  race where a batch collected before the rewind could advance past un-persisted data.
+- **Reasons:** No silent loss and no unbounded memory; the only cost of overload is latency,
+  which is reported. Deduplication keys make the re-reads idempotent.
+- **Trade-offs:** Under sustained overload the same data is read repeatedly; collection
+  latency grows until the writer catches up.
+- **Alternatives rejected:** Drop-and-count loses data that could have been kept; blocking
+  indefinitely stalls shutdown and health reporting.
+- **Consequences:** `MonitoringService` keeps working and committed checkpoint maps and an
+  epoch; `IngestionPipeline.run_once` provides the same semantics synchronously for the CLI.
+- **Revisit when:** a push-based source (one that cannot re-read) is added; it would need a
+  local spool or explicit drop accounting.

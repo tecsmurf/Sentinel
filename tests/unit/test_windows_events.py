@@ -8,7 +8,6 @@ import pytest
 from sentinel.collectors.windows_events import (
     MAX_EVENT_XML_CHARS,
     ChannelInfo,
-    EventLogAccessError,
     EventQuery,
     RawEvent,
     WindowsEventCollector,
@@ -17,59 +16,7 @@ from sentinel.collectors.windows_events import (
 )
 from sentinel.config import EventLogSettings
 from sentinel.models import Severity, SourceType
-from tests.support import BASE_TIME, event_xml
-
-
-class FakeBackend:
-    """Interprets EventQuery structurally, like the real XPath query would."""
-
-    def __init__(self, now=BASE_TIME):
-        self.now = now
-        self.channels: dict[str, list[tuple[int, datetime, int, RawEvent]]] = {}
-        self.errors: dict[str, str] = {}
-        self.queries: list[EventQuery] = []
-
-    def add(self, channel, record_id, *, provider="App", event_id=1, level=2, when=None, **kw):
-        when = when or self.now - timedelta(minutes=1)
-        message = kw.pop("message", None)
-        xml = event_xml(
-            provider=provider, event_id=event_id, record_id=record_id, when=when, level=level,
-            channel=channel, **kw,
-        )  # fmt: skip
-        self.channels.setdefault(channel, []).append(
-            (record_id, when, level, RawEvent(xml, message))
-        )
-
-    def _events(self, channel):
-        if channel in self.errors:
-            raise EventLogAccessError(self.errors[channel], f"{channel}: simulated")
-        if channel not in self.channels:
-            raise EventLogAccessError("not_found", f"{channel}: missing")
-        return self.channels[channel]
-
-    def query(self, query):
-        self.queries.append(query)
-        events = sorted(self._events(query.channel), key=lambda e: e[0], reverse=query.newest_first)
-        result = []
-        for record_id, when, level, raw in events:
-            if query.after_record_id is not None and record_id <= query.after_record_id:
-                continue
-            if query.levels and level not in query.levels:
-                continue
-            if query.within is not None and when < self.now - query.within:
-                continue
-            result.append(raw)
-            if len(result) >= query.max_events:
-                break
-        return result
-
-    def channel_info(self, channel):
-        events = self._events(channel)
-        ids = [e[0] for e in events]
-        return ChannelInfo(min(ids) if ids else None, len(ids))
-
-    def notifier(self, channels):
-        return None
+from tests.support import BASE_TIME, FakeBackend, event_xml
 
 
 def collector(backend, **settings):
