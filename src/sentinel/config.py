@@ -87,6 +87,8 @@ class MonitoringSettings:
         4 * 1024 * 1024, minimum=64 * 1024, maximum=256 * 1024 * 1024
     )
     multiline_flush_seconds: float = _bounded(5.0, minimum=0.5, maximum=600)
+    # A newly added log file is read from at most this many bytes before its end.
+    initial_backfill_bytes: int = _bounded(1024 * 1024, minimum=0, maximum=256 * 1024 * 1024)
 
 
 @dataclass

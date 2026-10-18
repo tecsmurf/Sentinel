@@ -33,6 +33,7 @@ Rules for maintaining this file:
 | D-016 | Executable packaging deferred until the application is stable | accepted |
 | D-017 | Small, verified commits pushed directly to the working branch | accepted |
 | D-018 | `src/` package layout with a single `sentinel` package | accepted |
+| D-019 | Text logs: shared-delete opens, bounded backfill, generations for rotation | accepted |
 
 ---
 
@@ -442,3 +443,36 @@ Rules for maintaining this file:
   to pass against uninstalled code.
 - **Consequences:** Tests import `sentinel.*`; the console entry point is `sentinel`.
 - **Revisit when:** not expected.
+
+## D-019 — Text logs: shared-delete opens, bounded backfill, generations for rotation
+
+- **Date:** 2026-10-18
+- **Status:** accepted
+- **Context and problem:** Applications rotate their logs by renaming or deleting the active
+  file. On Windows, Python's built-in `open()` does not pass `FILE_SHARE_DELETE`, so while
+  Sentinel holds a log open, the application's rename fails (verified by
+  `tests/windows/test_text_logs_windows.py`). Separately, a newly configured log can already
+  be gigabytes long, and rotation can reuse byte offsets that were already ingested.
+- **Options considered:** plain `open()` with very short read windows; `CreateFile` with
+  `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE`; copying the file before reading.
+  For history: import everything vs. start at the end vs. a bounded backfill. For offset
+  reuse: rely on content hashes only vs. generation counters plus content hashes.
+- **Decision:** On Windows, open logs through `CreateFile` with all three share flags
+  (`collectors.text_logs.open_shared`). A newly discovered file is read from at most
+  `monitoring.initial_backfill_bytes` (default 1 MiB) before its end, starting at the next
+  line boundary, and this is reported. Rotation, truncation, and in-place rewrites (detected
+  from file identity, size, and a SHA-256 of the first 1 KiB) start a new *generation*;
+  deduplication keys combine source, path, generation, offset, and a content hash.
+- **Reasons:** Monitoring must never interfere with the monitored application. Bounded
+  backfill keeps first ingestion fast and the database small while still capturing recent
+  context. Generations make keys unique across rotations even on filesystems without stable
+  file IDs.
+- **Trade-offs:** Windows-specific open path (covered by Windows tests); history older than
+  the backfill window is not imported; data written to a file after Sentinel's last read but
+  before rotation can be missed — when detectable, this is reported as a warning.
+- **Alternatives rejected:** Plain `open()` blocks rotation; copying files doubles I/O and
+  still races the writer; importing full history is unbounded (D-014).
+- **Consequences:** Checkpoints store `file_id`, `generation`, `offset`, `head_hash`,
+  encoding, and pending-record state per file.
+- **Revisit when:** reading rotated predecessor files (`app.log.1`) to close the rotation gap
+  becomes a requirement.
