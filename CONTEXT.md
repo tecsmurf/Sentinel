@@ -8,7 +8,7 @@
 > **tested** (automated tests pass), **verified on Windows** (exercised on a real Windows
 > machine), **known-broken**.
 
-Last updated: 2026-10-18 — Phase 3 (text-log monitoring).
+Last updated: 2026-10-19 — Phases 0-5 complete, CLI and reports done; Phase 6 (desktop UI) next.
 
 ## 1. Project identity
 
@@ -169,16 +169,24 @@ Markdown, and HTML reports with optional redaction; safe, explained cleanup cand
 | CI workflow | implemented (first run pending) |
 | Packaging (PyInstaller) | planned (deferred, D-016) |
 
-- **Known bugs:** none (no code yet).
-- **Test results:** no tests yet.
-- **Unresolved technical decisions:** whether to use SQLite FTS5 for message search (start
-  with indexed `LIKE` queries; revisit if search on large databases is slow).
-- **Current phase:** Phase 0 — audit and documentation.
+- **Known bugs:** none open. Cosmetic: the temp scan lists `%TMP%`/`%LOCALAPPDATA%\Temp`
+  as "skipped (same location)" when they alias `%TEMP%`; default aliases should be dropped silently.
+- **Test results (2026-10-19):** 463 passed, 1 skipped locally (symlink test needs Developer
+  Mode on Windows; runs on Linux CI). CI green on c1323ac (lint, Ubuntu, Windows).
+- **Lessons recorded:** Windows CI exposed non-contiguous Event Log record numbers (fixed in
+  c1323ac); CLI tests exposed a LogRecord `extra` key collision (fixed in 4c04cb5, guarded by a
+  static test). Always wait for CI after pushing.
+- **Unresolved technical decisions:** FTS5 for message search (indexed LIKE for now).
+- **Current phase:** Phase 6 — desktop UI (PySide6) has not been started.
 - **Next three tasks:**
-  1. Implement the read-only temp-directory scanner (iterative, cancellable, no reparse-point
-     traversal) with tests.
-  2. Persist scan snapshots and compare growth between scans.
-  3. Implement text-log parsing and incremental tailing with rotation handling.
+  1. PySide6 UI: `ui/app.py` (`run_gui(paths, config, warnings)`), theme, main window with
+     Dashboard, Live Events, File Intelligence (+ cleanup candidates), Findings & Incidents,
+     Scan (progress/cancel via QThread), Settings, Reports; tray notifications via
+     `MonitoringService(on_analysis=...)` marshalled to the UI thread with signals. Then add the
+     `gui` subcommand to `main.py` and make it the default.
+  2. Drop default temp-root aliases silently in `scanner/temp_scanner.resolve_scan_roots`.
+  3. PyInstaller packaging (verify the exe starts), README (install/run/test/features/limitations/
+     screenshots via `QWidget.grab()` offscreen), CONTRIBUTING.md, final CONTEXT/DECISIONS pass.
 
 ## 7. Development workflow
 
