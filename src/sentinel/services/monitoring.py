@@ -42,7 +42,14 @@ from sentinel.collectors.windows_events import (
     create_backend,
 )
 from sentinel.config import AppConfig
-from sentinel.models import Observation, Severity, SourceType, utc_now
+from sentinel.models import (
+    LOG_BYTES_METRIC,
+    Observation,
+    Severity,
+    SourceType,
+    utc_now,
+)
+from sentinel.services.analysis_service import AnalysisResult, AnalysisService
 from sentinel.storage import Repository
 
 logger = logging.getLogger(__name__)
@@ -50,7 +57,7 @@ logger = logging.getLogger(__name__)
 SENTINEL_SOURCE = "sentinel:monitoring"
 SENTINEL_PROVIDER = "Sentinel Local"
 HEALTH_EVENT_TYPE = "monitoring_health"
-LOG_BYTES_METRIC = "log_bytes_ingested"
+RETENTION_INTERVAL_SECONDS = 6 * 3600
 BACKPRESSURE_REPORT_INTERVAL = 60.0
 RETRY_DELAY_SECONDS = 0.5
 MORE, DONE, RETRY = "more", "done", "retry"
@@ -265,6 +272,9 @@ class MonitorStatus:
     last_text_poll: datetime | None = None
     last_event_poll: datetime | None = None
     last_error: str = ""
+    last_analysis_at: datetime | None = None
+    last_retention_at: datetime | None = None
+    open_findings: int = 0
 
 
 _STOP = object()
@@ -281,6 +291,8 @@ class MonitoringService:
         event_backend: EventLogBackend | Literal["auto"] | None = "auto",
         clock: Callable[[], datetime] = utc_now,
         queue_size: int | None = None,
+        analysis: bool = True,
+        on_analysis: Callable[[AnalysisResult], None] | None = None,
     ) -> None:
         self.database_path = database_path
         self.config = config
@@ -298,6 +310,9 @@ class MonitoringService:
         self._watcher = LogWatcher(self.request_poll)
         self._pending_notes: list[Observation] = []
         self._last_backpressure_note = float("-inf")
+        self._analysis_enabled = analysis
+        self._on_analysis = on_analysis
+        self._analysis_wake = threading.Event()
 
     # -------------------------------------------------------------- lifecycle
 
@@ -328,6 +343,8 @@ class MonitoringService:
         ]
         if self.pipeline.events is not None and self.pipeline.events.channels:
             targets.append(("sentinel-eventlog", self._event_loop))
+        if self._analysis_enabled:
+            targets.append(("sentinel-analysis", self._analysis_loop))
         self._threads = [
             threading.Thread(target=fn, name=name, daemon=True) for name, fn in targets
         ]
@@ -349,6 +366,7 @@ class MonitoringService:
             return
         self._stop.set()
         self._text_wake.set()
+        self._analysis_wake.set()
         self._watcher.stop()
         writer, *workers = self._threads
         for thread in workers:
@@ -367,6 +385,10 @@ class MonitoringService:
         with self._dirty_lock:
             self._dirty.add(source_id or "*")
         self._text_wake.set()
+
+    def request_analysis(self) -> None:
+        """Run the detection rules now (for example, right after a scan)."""
+        self._analysis_wake.set()
 
     def status(self) -> MonitorStatus:
         with self._status_lock:
@@ -535,3 +557,62 @@ class MonitoringService:
             self._status.observations_written += inserted
             self._status.batches_written += 1
             self._status.last_write_at = self.clock()
+
+    def _analysis_loop(self) -> None:
+        """Run the rules every ``analysis_interval_seconds``; apply retention every 6 hours.
+
+        Analysis writes findings through its own connection; with WAL and ``BEGIN
+        IMMEDIATE`` its short, infrequent transactions simply queue behind the writer's.
+        """
+        interval = self.config.monitoring.analysis_interval_seconds
+        analysis = AnalysisService(self.database_path, self.config, clock=self.clock)
+        last_retention = float("-inf")
+        # Give the collectors a moment to persist their first batches.
+        self._analysis_wake.wait(min(5.0, interval))
+        self._analysis_wake.clear()
+        while not self._stop.is_set():
+            try:
+                result = analysis.run()
+            except Exception as exc:
+                logger.exception("analysis run failed")
+                with self._status_lock:
+                    self._status.last_error = f"analysis: {type(exc).__name__}"
+            else:
+                self._after_analysis(result)
+            if time.monotonic() - last_retention >= RETENTION_INTERVAL_SECONDS:
+                last_retention = time.monotonic()
+                self._apply_retention()
+            self._analysis_wake.wait(interval)
+            self._analysis_wake.clear()
+
+    def _after_analysis(self, result: AnalysisResult) -> None:
+        repo = Repository.open(self.database_path)
+        try:
+            open_findings = sum(repo.open_finding_counts().values())
+        finally:
+            repo.close()
+        with self._status_lock:
+            self._status.last_analysis_at = result.ran_at
+            self._status.open_findings = open_findings
+        if self._on_analysis is not None:
+            try:
+                self._on_analysis(result)
+            except Exception:  # a UI callback must never stop analysis
+                logger.exception("analysis callback failed")
+
+    def _apply_retention(self) -> None:
+        try:
+            repo = Repository.open(self.database_path)
+            try:
+                removed = repo.apply_retention(self.config.retention, self.clock())
+            finally:
+                repo.close()
+        except Exception as exc:
+            logger.exception("retention failed")
+            with self._status_lock:
+                self._status.last_error = f"retention: {type(exc).__name__}"
+            return
+        with self._status_lock:
+            self._status.last_retention_at = self.clock()
+        if removed.total:
+            logger.info("retention removed old data", extra={"rows": removed.total})

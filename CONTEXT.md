@@ -161,7 +161,7 @@ Markdown, and HTML reports with optional redaction; safe, explained cleanup cand
 | Monitoring pipeline (`services/monitoring.py`): `IngestionPipeline` (sync, CLI) and `MonitoringService` (text worker with watcher + reconciliation, event worker with subscriptions, batching writer, bounded queue, checkpoint-based backpressure, epoch rewind after failed writes, health observations, log-growth metrics, status snapshot) | implemented, tested (integration, threaded) |
 | Detection rules (`analysis/rules.py`, 9 rules), event knowledge base (`analysis/recommendations.py`), `AnalysisService` (input building, dedup/merge, suppression) | implemented, tested (unit + integration) |
 | Correlation into incidents with reasons + template hypotheses (`analysis/correlation.py`, D-021) | implemented, tested (unit + integration) |
-| Periodic analysis + retention in the monitoring service | planned |
+| Periodic analysis (every `analysis_interval_seconds`) + retention (every 6 h) on a `sentinel-analysis` thread; `request_analysis()`, `on_analysis` callback | implemented, tested (integration) |
 | Reports | planned |
 | Headless CLI | planned |
 | Desktop UI | planned |

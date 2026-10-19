@@ -33,6 +33,7 @@ from sentinel.analysis.rules import (
 )
 from sentinel.config import AppConfig
 from sentinel.models import (
+    LOG_BYTES_METRIC,
     Finding,
     FindingDraft,
     FindingStatus,
@@ -42,7 +43,6 @@ from sentinel.models import (
     Severity,
     utc_now,
 )
-from sentinel.services.monitoring import LOG_BYTES_METRIC
 from sentinel.services.scan_service import TEMP_SCAN
 from sentinel.storage import ObservationFilter, Repository
 

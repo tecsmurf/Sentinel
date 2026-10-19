@@ -22,6 +22,8 @@ from enum import IntEnum, StrEnum
 from typing import Any
 
 EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+# Metric recorded by the monitoring pipeline: bytes read from a monitored log file.
+LOG_BYTES_METRIC = "log_bytes_ingested"
 _ONE_MICROSECOND = timedelta(microseconds=1)
 
 

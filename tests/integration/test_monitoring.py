@@ -216,3 +216,40 @@ class TestMonitoringService:
         service.start()
         service.stop()
         assert not service.running
+
+
+def test_service_runs_analysis_and_retention_periodically(database, tmp_path):
+    log = tmp_path / "errors.log"
+    log.write_text("", encoding="utf-8")
+    config = make_config(log, channels=())
+    config.monitoring.analysis_interval_seconds = 0.2
+    results = []
+    service = MonitoringService(
+        database.path, config, event_backend=None, on_analysis=results.append
+    )
+    service.start()
+    try:
+        with open(log, "a", encoding="utf-8") as handle:
+            for _ in range(6):
+                handle.write("ERROR Payment gateway timeout\n")
+        service.request_analysis()
+        assert wait_until(lambda: any(r.created for r in results), timeout=10)
+        assert wait_until(lambda: service.status().open_findings >= 1)
+        status = service.status()
+        assert status.last_analysis_at is not None
+        assert status.last_retention_at is not None
+    finally:
+        service.stop()
+    created = [f for r in results for f in r.new_open]
+    assert created[0].rule_id == "repeated_error"
+
+
+def test_analysis_can_be_disabled(database, log):
+    service = MonitoringService(
+        database.path, make_config(log, channels=()), event_backend=None, analysis=False
+    )
+    service.start()
+    try:
+        assert "sentinel-analysis" not in [t.name for t in service._threads]
+    finally:
+        service.stop()
