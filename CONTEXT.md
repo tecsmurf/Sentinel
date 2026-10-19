@@ -98,6 +98,28 @@ tests/  unit/  integration/  windows/  fixtures/
   arrive with the detection engine.
 - Search uses `LIKE … ESCAPE '\'` with wildcards escaped (no FTS yet).
 
+### Detection (implemented — `analysis/rules.py`, `services/analysis_service.py`)
+
+Rules are pure functions over data fetched by `AnalysisService` (warning+ observations for
+the longest window, per-source volume buckets, log-growth metric samples, recent temp-scan
+comparisons). Defaults below; overrides go in `config.rules.<rule_id>` and are validated.
+
+| Rule ID | Fires when (defaults) | Subject (dedup/suppression key) | Evidence |
+|---------|-----------------------|----------------------------------|----------|
+| `repeated_error` | same fingerprint ≥5 errors in 15 min (excl. crashes/service failures) | `fingerprint:<fp>` | observations |
+| `app_crash` | same app ≥2 crash/hang events (App Error 1000, Hang 1002, WER 1001 app crash, .NET 1026) in 24 h | `app:<exe>` | observations |
+| `service_failure` | same service ≥2 SCM failures (7000/7001/7009/7011/7022/7023/7024/7031/7034) in 24 h | `service:<name>` | observations |
+| `critical_event` | any Critical-level Windows event in 24 h (e.g. Kernel-Power 41) | `event:<provider>:<id>` | observations |
+| `log_growth` | ≥100 MB/h appended to a monitored log (60 min) | `log:<path>` | metric samples |
+| `temp_growth` | temp root grew ≥500 MB, or ≥50 % and ≥100 MB, between complete scans (last 24 h) | `root:<root key>` | scan run + both snapshots |
+| `event_burst` | 5-min bucket ≥100 events and ≥ mean + 4σ and ≥3× mean of ≥12 baseline buckets (24 h) | `burst:<source>:<bucket>` | sampled observations |
+| `error_cluster` | errors from ≥3 distinct components within 5 min (last 60 min) | `cluster:<bucket>` | observations |
+| `collector_health` | ≥3 monitoring warnings for a source in 60 min, or any `log_gap`/`log_cleared`/`ingestion_delayed` | `collector:<source>` | health observations |
+
+Dedup: a draft merges into the unresolved finding with the same (rule, subject) whose window
+ended within the rule's window; drafts that add no new evidence change nothing. Suppressed
+(rule, subject) pairs are stored with status `suppressed`. Evidence per finding is capped at 200.
+
 ## 4. Product requirements (summary)
 
 Real-time monitoring and on-demand scans; Windows Event Log support (Application, System, and
@@ -137,7 +159,8 @@ Markdown, and HTML reports with optional redaction; safe, explained cleanup cand
 | File watching (`collectors/file_watcher.py`, watchdog) as a low-latency trigger; reconciliation by the monitoring service | implemented, tested (integration, real observers) |
 | Windows Event Log collector (`collectors/windows_events.py`): backend interface, pywin32 backend (EvtQuery/EvtRender/EvtFormatMessage, cached publisher metadata, pull-mode subscriptions as wake-up), bounded look-back import, record-ID checkpoints, gap/cleared-log detection, access-denied handling, entity extraction (service/app/WER) | implemented, tested (unit with fake backend + read-only Windows API tests) |
 | Monitoring pipeline (`services/monitoring.py`): `IngestionPipeline` (sync, CLI) and `MonitoringService` (text worker with watcher + reconciliation, event worker with subscriptions, batching writer, bounded queue, checkpoint-based backpressure, epoch rewind after failed writes, health observations, log-growth metrics, status snapshot) | implemented, tested (integration, threaded) |
-| Detection rules and correlation | planned |
+| Detection rules (`analysis/rules.py`, 9 rules), event knowledge base (`analysis/recommendations.py`), `AnalysisService` (input building, dedup/merge, suppression) | implemented, tested (unit + integration) |
+| Correlation into incidents + hypotheses; periodic analysis in the monitoring service | planned |
 | Reports | planned |
 | Headless CLI | planned |
 | Desktop UI | planned |

@@ -249,6 +249,22 @@ class Repository(FindingsMixin):
         rows = self.conn.execute(sql, [bucket, bucket, *params]).fetchall()
         return [(from_micros(row[0]), row[1]) for row in rows]
 
+    def observation_volume_by_source(
+        self, since: datetime, until: datetime, bucket_seconds: int
+    ) -> dict[str, list[tuple[datetime, int]]]:
+        """Per-source observation counts per time bucket, excluding Sentinel's own records."""
+        bucket = int(bucket_seconds) * 1_000_000
+        rows = self.conn.execute(
+            "SELECT source_id, (event_ts / ?) * ? AS bucket, COUNT(*) FROM observations "
+            "WHERE event_ts >= ? AND event_ts < ? AND source_type != ? "
+            "GROUP BY source_id, bucket ORDER BY source_id, bucket",
+            (bucket, bucket, to_micros(since), to_micros(until), str(SourceType.SENTINEL)),
+        )
+        result: dict[str, list[tuple[datetime, int]]] = {}
+        for source_id, start, count in rows:
+            result.setdefault(source_id, []).append((from_micros(start), count))
+        return result
+
     def severity_counts(self, since: datetime | None = None) -> dict[Severity, int]:
         where, params = ObservationFilter(since=since).to_sql()
         sql = f"SELECT severity, COUNT(*) FROM observations WHERE {where} GROUP BY severity"  # noqa: S608
@@ -330,6 +346,17 @@ class Repository(FindingsMixin):
                 (metric, subject, to_micros(since)),
             )
         return [(row[0], from_micros(row[1]), row[2]) for row in rows]
+
+    def metric_samples_since(
+        self, metric: str, since: datetime
+    ) -> list[tuple[int, str, datetime, float]]:
+        """(id, subject, timestamp, value) samples of one metric, oldest first."""
+        rows = self.conn.execute(
+            "SELECT id, subject, ts, value FROM metric_samples WHERE metric = ? AND ts >= ? "
+            "ORDER BY ts, id",
+            (metric, to_micros(since)),
+        )
+        return [(row[0], row[1], from_micros(row[2]), row[3]) for row in rows]
 
     # ----------------------------------------------------------------------------------
     # Scans
