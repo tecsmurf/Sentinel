@@ -62,10 +62,11 @@ class TestFindingLifecycle:
         add_errors(repo, make_observation, 5)
         result = service(database).run()
         (finding,) = findings(database)
+        resolved_at = NOW - timedelta(minutes=5)
         with repo.transaction():
             repo.add_suppression(finding.rule_id, finding.subject, "known issue", NOW)
-            repo.set_finding_status(finding.id, FindingStatus.RESOLVED, NOW)
-        add_errors(repo, make_observation, 5, start_minutes=4)
+            repo.set_finding_status(finding.id, FindingStatus.RESOLVED, resolved_at)
+        add_errors(repo, make_observation, 5, start_minutes=4)  # after it was resolved
         again = service(database).run()
         assert again.created == [] and len(again.suppressed) == 1
         assert again.new_open == []
@@ -175,3 +176,32 @@ def test_disabled_rules_produce_nothing(database, repo, make_observation, disabl
     add_errors(repo, make_observation, 10)
     service(database, rules={disabled: {"enabled": False}}).run()
     assert findings(database, rule_ids=[disabled]) == []
+
+
+class TestResolvedFindings:
+    def test_resolution_sticks_without_new_evidence(self, database, repo, make_observation):
+        # Regression: resolved findings were recreated from the same evidence on the next run.
+        add_errors(repo, make_observation, 5)
+        service(database).run()
+        (finding,) = findings(database)
+        with repo.transaction():
+            repo.set_finding_status(finding.id, FindingStatus.RESOLVED, NOW)
+        result = service(database).run()
+        assert result.created == []
+        assert [f.status for f in findings(database)] == [FindingStatus.RESOLVED]
+
+    def test_problem_returning_after_resolution_raises_a_new_finding(
+        self, database, repo, make_observation
+    ):
+        add_errors(repo, make_observation, 5, start_minutes=14)
+        service(database).run()
+        (finding,) = findings(database)
+        with repo.transaction():
+            repo.set_finding_status(finding.id, FindingStatus.RESOLVED, NOW - timedelta(minutes=10))
+        add_errors(repo, make_observation, 5, start_minutes=6)
+        result = service(database).run()
+        assert len(result.created) == 1
+        assert sorted(f.status for f in findings(database)) == [
+            FindingStatus.OPEN,
+            FindingStatus.RESOLVED,
+        ]

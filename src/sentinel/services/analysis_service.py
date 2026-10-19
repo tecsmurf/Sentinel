@@ -15,6 +15,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from sentinel.analysis.correlation import (
+    CorrelationSettings,
+    correlate,
+    hypotheses_for_group,
+    incident_summary,
+    incident_title,
+)
 from sentinel.analysis.rules import (
     RULES_BY_ID,
     AnalysisInput,
@@ -29,6 +36,8 @@ from sentinel.models import (
     Finding,
     FindingDraft,
     FindingStatus,
+    Incident,
+    IncidentStatus,
     ScanStatus,
     Severity,
     utc_now,
@@ -55,6 +64,9 @@ class AnalysisResult:
     unchanged: int = 0
     warnings: list[str] = field(default_factory=list)
     new_open: list[Finding] = field(default_factory=list)
+    incidents_created: list[int] = field(default_factory=list)
+    incidents_updated: list[int] = field(default_factory=list)
+    new_incidents: list[Incident] = field(default_factory=list)
 
 
 class AnalysisService:
@@ -92,7 +104,11 @@ class AnalysisService:
                         result.suppressed.append(finding_id)
                     else:
                         result.unchanged += 1
+                self.correlate(repo, now, result)
             result.new_open = [f for i in result.created if (f := repo.get_finding(i))]
+            result.new_incidents = [
+                i for n in result.incidents_created if (i := repo.get_incident(n))
+            ]
         finally:
             repo.close()
         logger.info(
@@ -166,6 +182,73 @@ class AnalysisService:
             draft.evidence = fresh[-room:] if room else []
             repo.merge_finding(existing.id, draft, now)
             return UPDATED, existing.id
+        # A finding the user resolved is raised again only if evidence arrived afterwards;
+        # otherwise the same old evidence would recreate it on every run.
+        resolved = repo.find_latest_finding(draft.rule_id, draft.subject, FindingStatus.RESOLVED)
+        if resolved is not None and draft.window_end <= resolved.updated_at:
+            return UNCHANGED, resolved.id
         if repo.is_suppressed(draft.rule_id, draft.subject):
             return SUPPRESSED, repo.insert_finding(draft, FindingStatus.SUPPRESSED, now)
         return CREATED, repo.insert_finding(draft, FindingStatus.OPEN, now)
+
+    @staticmethod
+    def correlate(
+        repo: Repository,
+        now: datetime,
+        result: AnalysisResult,
+        settings: CorrelationSettings | None = None,
+    ) -> None:
+        """Group open findings into incidents and refresh their hypotheses."""
+        settings = settings or CorrelationSettings()
+        candidates = repo.list_findings(
+            statuses=[FindingStatus.OPEN, FindingStatus.ACKNOWLEDGED],
+            since=now - settings.lookback,
+            limit=settings.max_findings,
+        )
+        for group in correlate(candidates, settings):
+            finding_ids = [f.id for f in group.findings]
+            existing = sorted({f.incident_id for f in group.findings if f.incident_id})
+            incident = repo.get_incident(existing[0]) if existing else None
+            if incident is None:
+                incident = Incident(
+                    id=0,
+                    title=incident_title(group),
+                    severity=group.severity,
+                    status=IncidentStatus.OPEN,
+                    created_at=now,
+                    updated_at=now,
+                    window_start=group.window_start,
+                    window_end=group.window_end,
+                    summary=incident_summary(group),
+                    reasons=group.reasons,
+                )
+                result.incidents_created.append(repo.create_incident(incident))
+            else:
+                joined = set(finding_ids) - set(incident.finding_ids)
+                changed = (
+                    joined
+                    or incident.severity != group.severity
+                    or incident.window_start != group.window_start
+                    or incident.window_end != group.window_end
+                    or incident.reasons != group.reasons
+                )
+                if changed:
+                    incident.title = incident_title(group)
+                    incident.severity = group.severity
+                    incident.window_start = group.window_start
+                    incident.window_end = group.window_end
+                    incident.summary = incident_summary(group)
+                    incident.reasons = group.reasons
+                    incident.updated_at = now
+                    repo.update_incident(incident)
+                    if joined and incident.status is IncidentStatus.RESOLVED:
+                        repo.set_incident_status(incident.id, IncidentStatus.OPEN, now)
+                    result.incidents_updated.append(incident.id)
+            repo.assign_findings(
+                [f.id for f in group.findings if f.incident_id != incident.id], incident.id
+            )
+            hypotheses = hypotheses_for_group(group, incident.id)
+            for hypothesis in hypotheses:
+                repo.upsert_hypothesis(hypothesis)
+            repo.prune_hypotheses(incident.id, [h.template_id for h in hypotheses])
+        repo.delete_empty_incidents()

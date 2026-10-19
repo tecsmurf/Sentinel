@@ -160,7 +160,8 @@ Markdown, and HTML reports with optional redaction; safe, explained cleanup cand
 | Windows Event Log collector (`collectors/windows_events.py`): backend interface, pywin32 backend (EvtQuery/EvtRender/EvtFormatMessage, cached publisher metadata, pull-mode subscriptions as wake-up), bounded look-back import, record-ID checkpoints, gap/cleared-log detection, access-denied handling, entity extraction (service/app/WER) | implemented, tested (unit with fake backend + read-only Windows API tests) |
 | Monitoring pipeline (`services/monitoring.py`): `IngestionPipeline` (sync, CLI) and `MonitoringService` (text worker with watcher + reconciliation, event worker with subscriptions, batching writer, bounded queue, checkpoint-based backpressure, epoch rewind after failed writes, health observations, log-growth metrics, status snapshot) | implemented, tested (integration, threaded) |
 | Detection rules (`analysis/rules.py`, 9 rules), event knowledge base (`analysis/recommendations.py`), `AnalysisService` (input building, dedup/merge, suppression) | implemented, tested (unit + integration) |
-| Correlation into incidents + hypotheses; periodic analysis in the monitoring service | planned |
+| Correlation into incidents with reasons + template hypotheses (`analysis/correlation.py`, D-021) | implemented, tested (unit + integration) |
+| Periodic analysis + retention in the monitoring service | planned |
 | Reports | planned |
 | Headless CLI | planned |
 | Desktop UI | planned |

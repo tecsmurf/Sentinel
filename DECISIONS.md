@@ -35,6 +35,7 @@ Rules for maintaining this file:
 | D-018 | `src/` package layout with a single `sentinel` package | accepted |
 | D-019 | Text logs: shared-delete opens, bounded backfill, generations for rotation | accepted |
 | D-020 | Backpressure by not advancing checkpoints; epochs after failed writes | accepted |
+| D-021 | Correlation on specific entities; resolutions stick until new evidence arrives | accepted |
 
 ---
 
@@ -507,3 +508,37 @@ Rules for maintaining this file:
   epoch; `IngestionPipeline.run_once` provides the same semantics synchronously for the CLI.
 - **Revisit when:** a push-based source (one that cannot re-read) is added; it would need a
   local spool or explicit drop accounting.
+
+## D-021 — Correlation on specific entities; resolutions stick until new evidence arrives
+
+- **Date:** 2026-10-19
+- **Status:** accepted
+- **Context and problem:** Incidents must group findings that plausibly belong together and
+  say why, without inventing relationships. Separately, a resolved finding was recreated on
+  the next analysis run because its old evidence was still inside the rule window (found by
+  `tests/integration/test_incidents.py`).
+- **Options considered:** link on any shared attribute (channel, provider, source); link on
+  time proximity alone; link only on specific entities plus a narrowly scoped temporal link.
+  For resolutions: never re-raise; re-raise whenever the rule matches; re-raise only when
+  evidence newer than the resolution exists.
+- **Decision:** Findings are linked when they share a specific entity (application, service,
+  path, or error fingerprint) within 6 hours, or — as an explicitly labelled timing-only link —
+  when both come from failure-type rules within 10 minutes. Channel, provider, and source
+  identifiers never link findings. A single high/critical finding forms its own incident.
+  Hypotheses come from fixed templates with confidence capped at "medium" and rationales
+  that cite their basis and state that co-occurrence is not causation. A resolved finding is
+  raised again (as a new finding) only when its rule's evidence includes something newer than
+  the resolution time.
+- **Reasons:** Generic keys would merge unrelated events (every Application-channel event
+  shares a channel); timing-only links are useful for "something happened at 14:02" but must
+  be visibly weaker. Users must be able to trust that resolving a finding means something.
+- **Trade-offs:** Some genuinely related findings without a shared entity and more than
+  10 minutes apart are not grouped. A problem that recurs only with evidence already seen
+  before resolution is not re-raised.
+- **Alternatives rejected:** Time-only grouping across all rules produced misleading
+  incidents; re-raising on every match makes resolution meaningless.
+- **Consequences:** `analysis/correlation.py` is pure and unit-tested; `AnalysisService`
+  maintains incident membership, merges incidents when groups join, reopens a resolved
+  incident when new findings join it, and refreshes hypotheses each run.
+- **Revisit when:** users report missed groupings that a new specific entity type (for
+  example, a driver or device identifier) would capture.

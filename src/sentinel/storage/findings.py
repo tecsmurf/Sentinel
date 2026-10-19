@@ -84,6 +84,17 @@ class FindingsMixin:
         ).fetchone()
         return None if row is None else _row_to_finding(row)
 
+    def find_latest_finding(
+        self, rule_id: str, subject: str, status: FindingStatus
+    ) -> Finding | None:
+        """The most recently updated finding for (rule, subject) with the given status."""
+        row = self.conn.execute(
+            f"{_FINDING_SELECT} WHERE f.rule_id = ? AND f.subject = ? AND f.status = ? "
+            "ORDER BY f.updated_ts DESC, f.id DESC LIMIT 1",
+            (rule_id, subject, str(status)),
+        ).fetchone()
+        return None if row is None else _row_to_finding(row)
+
     def insert_finding(self, draft: FindingDraft, status: FindingStatus, now: datetime) -> int:
         cursor = self.conn.execute(
             "INSERT INTO findings (rule_id, subject, title, severity, status, detected_ts, "
