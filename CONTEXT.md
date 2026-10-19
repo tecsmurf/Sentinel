@@ -162,7 +162,7 @@ Markdown, and HTML reports with optional redaction; safe, explained cleanup cand
 | Detection rules (`analysis/rules.py`, 9 rules), event knowledge base (`analysis/recommendations.py`), `AnalysisService` (input building, dedup/merge, suppression) | implemented, tested (unit + integration) |
 | Correlation into incidents with reasons + template hypotheses (`analysis/correlation.py`, D-021) | implemented, tested (unit + integration) |
 | Periodic analysis (every `analysis_interval_seconds`) + retention (every 6 h) on a `sentinel-analysis` thread; `request_analysis()`, `on_analysis` callback | implemented, tested (integration) |
-| Reports | planned |
+| Reports (`services/report_service.py`: JSON/Markdown/HTML, evidence, incidents + labelled hypotheses, scans, health, limitations; HTML escaped + CSP; atomic writes) and redaction (`services/redaction.py`) | implemented, tested (unit + integration) |
 | Headless CLI | planned |
 | Desktop UI | planned |
 | Build tooling (pyproject, pins, ruff, pytest) | implemented, tested locally |
