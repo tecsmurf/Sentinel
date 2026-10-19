@@ -49,3 +49,22 @@ def test_default_identity_comes_from_the_environment(monkeypatch):
     monkeypatch.setenv("USERNAME", "zed-test-user")
     monkeypatch.setenv("COMPUTERNAME", "ZED-TEST-HOST")
     assert Redactor().text("zed-test-user on ZED-TEST-HOST") == "<user> on <computer>"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # Security review follow-ups: UNC, drive-less, spaces, compressed IPv6.
+        ("\\\\fileserver\\c$\\Users\\alice\\Desktop", "\\\\fileserver\\c$\\Users\\<user>\\Desktop"),
+        (r"\Users\alice\notes.txt", r"\Users\<user>\notes.txt"),
+        (r"C:\Users\John Smith\AppData\x", r"C:\Users\<user>\AppData\x"),
+        (r"C:\Users\carol app.log failed", r"C:\Users\<user> app.log failed"),
+        ("loopback ::1 and fe80::1ff:fe23:4567:890a%eth0", "loopback <ip> and <ip>"),
+        ("mapped ::ffff:192.0.2.128 here", "mapped <ip> here"),
+        ("2001:db8::8a2e:370:7334", "<ip>"),
+        ("at 12:00:01.250 and 10:30", "at 12:00:01.250 and 10:30"),
+        ("mac 00:1a:2b:3c:4d:5e", "mac 00:1a:2b:3c:4d:5e"),
+    ],
+)
+def test_extended_redaction(redactor, raw, expected):
+    assert redactor.text(raw) == expected

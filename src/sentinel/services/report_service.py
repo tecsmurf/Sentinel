@@ -18,6 +18,7 @@ import html
 import json
 import os
 import platform
+import re
 import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -124,6 +125,10 @@ class ReportService:
             repo.close()
         if options.redact:
             report = (self.redactor or Redactor()).apply(report)
+        for finding in report["findings"]:  # truncate *after* redaction
+            for item in finding["evidence"]:
+                if "message" in item:
+                    item["message"] = item["message"][:MESSAGE_LIMIT]
         return report
 
     def _findings(self, repo: Repository, options: ReportOptions, since: datetime) -> list[Finding]:
@@ -186,7 +191,9 @@ class ReportService:
                 "severity": obs.severity.label,
             }
             if options.include_raw_messages:
-                item["message"] = obs.message[:MESSAGE_LIMIT]
+                # Truncated only after redaction (see build), so that a cut can never
+                # split an identifier and leave a fragment the redactor cannot recognise.
+                item["message"] = obs.message
             evidence.append(item)
         for ref in refs:
             if ref.evidence_type is EvidenceType.SCAN_RUN:
@@ -373,17 +380,30 @@ class ReportService:
 # --------------------------------------------------------------------------------------
 
 
+_MD_PUNCTUATION = re.compile(r"([\\`*_{}\[\]()#+!|~])")
+
+
 def _md(text: Any) -> str:
-    """Escape untrusted text for Markdown: no raw HTML, no table breaks, single line."""
+    """Escape untrusted text for inline Markdown.
+
+    HTML is entity-encoded, and every character that can start a link, image, emphasis,
+    code span, heading, or table cell is backslash-escaped, so text such as
+    ``![x](http://host/pixel)`` renders literally instead of loading a remote image.
+    """
     value = "" if text is None else str(text)
     value = value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    value = value.replace("|", "\\|").replace("`", "\\`")
+    value = _MD_PUNCTUATION.sub(r"\\\1", value)
     return " ".join(value.split())
 
 
-def _md_quote(text: Any) -> str:
-    lines = ("" if text is None else str(text))[:MESSAGE_LIMIT].splitlines() or [""]
-    return "\n".join("> " + _md(line) for line in lines[:20])
+def _md_code(text: Any) -> str:
+    """Untrusted multi-line text as a fenced code block that the content cannot close."""
+    value = "" if text is None else str(text)
+    lines = value.splitlines()[:40] or [""]
+    body = "\n".join(lines)
+    longest = max((len(run) for run in re.findall(r"`+", body)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return f"{fence}text\n{body}\n{fence}"
 
 
 def render_markdown(report: dict[str, Any]) -> str:
@@ -462,7 +482,7 @@ def render_markdown(report: dict[str, Any]) -> str:
                     f"{_md(item['event_code'])} · {_md(item['severity'])}"
                 )
                 if "message" in item:
-                    out.append(_md_quote(item["message"]))
+                    out += ["", _md_code(item["message"]), ""]
             else:
                 details = ", ".join(f"{k}={v}" for k, v in item.items() if k != "type")
                 out.append(f"- {_md(item['type'])}: {_md(details)}")

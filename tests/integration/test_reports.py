@@ -15,7 +15,15 @@ from sentinel.services.scan_service import ScanService
 from tests.support import BASE_TIME
 
 NOW = BASE_TIME
-HOSTILE = r"<script>alert('x')</script> | C:\Users\alice\app.log contact alice@example.com"
+HOSTILE = (
+    r"<script>alert('x')</script> | C:\Users\alice\app.log contact alice@example.com "
+    "![x](http://evil.example/p.png) [click](javascript:alert(1))"
+)
+
+
+def _outside_code_blocks(markdown: str) -> str:
+    """Markdown with fenced code blocks removed (code is rendered literally by viewers)."""
+    return re.sub(r"(?ms)^(`{3,})text\n.*?^\1$", "", markdown)
 
 
 @pytest.fixture
@@ -112,9 +120,10 @@ def test_json_markdown_and_html_are_safe(database, seeded, tmp_path):
     assert data["findings"][0]["rule_id"] == "repeated_error"
 
     markdown = svc.write(report, tmp_path / "r.md", "md").read_text(encoding="utf-8")
-    assert "<script>" not in markdown
-    assert "&lt;script&gt;" in markdown
-    assert r"\|" in markdown  # pipes cannot break tables
+    prose = _outside_code_blocks(markdown)
+    assert "<script>" not in prose  # raw messages appear only inside fenced code blocks
+    assert "&lt;script&gt;" in prose  # excerpts in explanations are entity-encoded
+    assert r"\|" in prose  # pipes cannot break tables
     assert markdown.startswith("# Sentinel Local diagnostic report")
 
     page = svc.write(report, tmp_path / "r.html", "html").read_text(encoding="utf-8")
@@ -151,3 +160,40 @@ def test_health_records_are_sentinel_observations(database, seeded, repo):
 
     (record,) = repo.query_observations(ObservationFilter(source_types=[SourceType.SENTINEL]))
     assert record.metadata["source"] == "winevt:Security"
+
+
+def test_markdown_cannot_be_turned_into_links_or_images(database, seeded, tmp_path):
+    # Security review: ![x](url) in a log message must not render as a remote image.
+    svc = service(database, seeded)
+    report = svc.build(ReportOptions(redact=False))
+    markdown = svc.write(report, tmp_path / "r.md", "md").read_text(encoding="utf-8")
+    prose = _outside_code_blocks(markdown)
+    assert "](" not in prose
+    assert "![x]" not in prose
+    assert "![x](http://evil.example/p.png)" in markdown  # verbatim, inside a code block
+
+
+def test_code_fence_cannot_be_closed_by_message_content():
+    from sentinel.services.report_service import _md_code
+
+    block = _md_code("before\n```\n# heading?\n````")
+    fence = block.split("\n", 1)[0].removesuffix("text")
+    assert fence == "`" * 5
+    assert block.endswith("\n" + fence)
+
+
+def test_identifiers_are_redacted_before_truncation(database, repo, make_observation):
+    # Security review: truncating first could leave "ali", which no rule recognises.
+    from sentinel.services.report_service import MESSAGE_LIMIT
+
+    # "alice" starts 3 characters before the cut, so truncating first would leave " ali".
+    message = "x" * (MESSAGE_LIMIT - 4) + " alice was here"
+    with repo.transaction():
+        repo.insert_observations(
+            [make_observation(message, at=NOW - timedelta(minutes=5 - i)) for i in range(5)]
+        )
+    AnalysisService(database.path, AppConfig(), clock=lambda: NOW).run()
+    report = service(database, AppConfig()).build(ReportOptions(redact=True))
+    evidence = report["findings"][0]["evidence"][0]
+    assert len(evidence["message"]) == MESSAGE_LIMIT
+    assert "ali" not in evidence["message"][-10:]

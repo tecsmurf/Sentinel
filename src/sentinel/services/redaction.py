@@ -8,6 +8,7 @@ application may have written into its own log messages.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import socket
@@ -17,16 +18,34 @@ from typing import Any
 USER = "<user>"
 COMPUTER = "<computer>"
 
-_PROFILE_PATH = re.compile(r"(?i)\b([a-z]:[\\/]+users[\\/]+)([^\\/:*?\"<>|\r\n]+)")
+# Any "\Users\<name>" segment: drive paths, UNC paths (\\server\c$\Users\...), drive-less
+# paths, and URLs alike (over-redacting a URL segment is the safe failure). A name may
+# contain spaces only when another path separator follows it ("John Smith\AppData").
+_PROFILE_PATH = re.compile(
+    r"(?i)([\\/]users[\\/]+)(?:([^\\/:*?\"<>|\r\n]+?)(?=[\\/])|([^\\/:*?\"<>|\s]+))"
+)
 _EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 _IPV4 = re.compile(
     r"(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.])"
 )
-_IPV6 = re.compile(r"(?i)(?<![0-9a-f:])(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{1,4}(?![0-9a-f:])")
+# IPv6 candidates (compressed "::", embedded IPv4, zone IDs) are confirmed with ipaddress,
+# so times such as 12:00:01 and other colon-separated values are left alone.
+_IPV6_CANDIDATE = re.compile(
+    r"(?<![\w:.%])[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*(?:%[\w.-]+)?(?![\w:%])"
+)
 _DOMAIN_SID = re.compile(r"\bS-1-5-21(?:-\d+){3,4}\b")
 _KEEP_KEYS = frozenset({"rule_id", "severity", "status", "confidence", "format_version", "kind"})
 # Profile folders that are not personal and need no redaction.
 _SHARED_PROFILES = frozenset({"public", "default", "all users", "default user", USER})
+
+
+def _ipv6(match: re.Match[str]) -> str:
+    token = match.group(0)
+    try:
+        ipaddress.IPv6Address(token.split("%", 1)[0])
+    except ValueError:
+        return token
+    return "<ip>"
 
 
 def _local_identity() -> tuple[list[str], list[str]]:
@@ -55,14 +74,14 @@ class Redactor:
 
     def text(self, value: str) -> str:
         def profile(match: re.Match[str]) -> str:
-            name = match.group(2)
+            name = match.group(2) or match.group(3)
             return match.group(0) if name.casefold() in _SHARED_PROFILES else match.group(1) + USER
 
-        value = _PROFILE_PATH.sub(profile, value)
         value = _EMAIL.sub("<email>", value)
+        value = _PROFILE_PATH.sub(profile, value)
         value = _DOMAIN_SID.sub("<sid>", value)
+        value = _IPV6_CANDIDATE.sub(_ipv6, value)  # before IPv4: may embed an IPv4 address
         value = _IPV4.sub("<ip>", value)
-        value = _IPV6.sub("<ip>", value)
         for pattern, placeholder in self._literals:
             value = pattern.sub(placeholder, value)
         return value
