@@ -33,6 +33,9 @@ build = [
     "pyinstaller>=6.10",
 ]
 
+[project.scripts]
+sentinel = "sentinel.main:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

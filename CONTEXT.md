@@ -163,7 +163,7 @@ Markdown, and HTML reports with optional redaction; safe, explained cleanup cand
 | Correlation into incidents with reasons + template hypotheses (`analysis/correlation.py`, D-021) | implemented, tested (unit + integration) |
 | Periodic analysis (every `analysis_interval_seconds`) + retention (every 6 h) on a `sentinel-analysis` thread; `request_analysis()`, `on_analysis` callback | implemented, tested (integration) |
 | Reports (`services/report_service.py`: JSON/Markdown/HTML, evidence, incidents + labelled hypotheses, scans, health, limitations; HTML escaped + CSP; atomic writes) and redaction (`services/redaction.py`) | implemented, tested (unit + integration) |
-| Headless CLI | planned |
+| Headless CLI (`main.py`: `status`, `scan`, `collect`, `analyze`, `findings`, `events`, `report`; `--json`; exit codes 0/1/2/130) | implemented, tested (integration); smoke-tested on this machine (608 real events, 2.0 GB temp scan, redacted HTML report) |
 | Desktop UI | planned |
 | Build tooling (pyproject, pins, ruff, pytest) | implemented, tested locally |
 | CI workflow | implemented (first run pending) |
