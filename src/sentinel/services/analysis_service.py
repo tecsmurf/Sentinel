@@ -115,8 +115,9 @@ class AnalysisService:
             "analysis finished",
             extra={
                 "drafts": result.drafts,
-                "created": len(result.created),
-                "updated": len(result.updated),
+                # Not "created": that name is a reserved LogRecord attribute.
+                "findings_created": len(result.created),
+                "findings_updated": len(result.updated),
             },
         )
         return result

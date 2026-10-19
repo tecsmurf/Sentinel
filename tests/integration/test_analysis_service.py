@@ -205,3 +205,37 @@ class TestResolvedFindings:
             FindingStatus.OPEN,
             FindingStatus.RESOLVED,
         ]
+
+
+def test_analysis_works_with_info_logging_enabled(database, repo, make_observation, caplog):
+    # Regression: an `extra` key named "created" collided with LogRecord.created and raised
+    # KeyError on every run once the application configured INFO logging.
+    import logging
+
+    add_errors(repo, make_observation, 5)
+    with caplog.at_level(logging.INFO, logger="sentinel"):
+        result = service(database).run()
+    assert result.created
+    assert any(r.getMessage() == "analysis finished" for r in caplog.records)
+
+
+def test_no_logging_extra_key_collides_with_logrecord_attributes():
+    import ast
+    import logging
+    import pathlib
+
+    import sentinel
+
+    reserved = set(vars(logging.LogRecord("", 0, "", 0, "", (), None))) | {"message", "asctime"}
+    offenders = []
+    for path in pathlib.Path(sentinel.__file__).parent.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.keyword)
+                and node.arg == "extra"
+                and isinstance(node.value, ast.Dict)
+            ):
+                for key in node.value.keys:
+                    if isinstance(key, ast.Constant) and key.value in reserved:
+                        offenders.append(f"{path.name}:{key.lineno} {key.value}")
+    assert offenders == []
