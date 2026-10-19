@@ -45,6 +45,7 @@ _SYSTEM_TIME = re.compile(
     r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})?$"
 )
 _PROVIDER_NAME = re.compile(r"<Provider Name='([^']*)'")
+_RECORD_ID = re.compile(r"<EventRecordID>(\d+)</EventRecordID>")
 _DOTNET_APP = re.compile(r"Application:\s*(\S+?\.exe)\b", re.IGNORECASE)
 
 # Windows levels: 0 LogAlways, 1 Critical, 2 Error, 3 Warning, 4 Information, 5 Verbose.
@@ -101,14 +102,16 @@ class RawEvent:
 
 @dataclass(frozen=True, slots=True)
 class ChannelInfo:
-    oldest_record_id: int | None
-    record_count: int
+    """Record IDs of the oldest and newest events currently in a channel (``None`` if empty).
 
-    @property
-    def newest_record_id(self) -> int | None:
-        if not self.oldest_record_id or not self.record_count:
-            return None
-        return self.oldest_record_id + self.record_count - 1
+    Both are read from the events themselves. They are deliberately *not* derived from
+    the channel's record count: record numbers are not guaranteed to be contiguous (seen on
+    freshly provisioned Windows images), and an underestimated "newest" would look like a
+    cleared log and cause events to be re-read.
+    """
+
+    oldest_record_id: int | None
+    newest_record_id: int | None
 
 
 class Notifier(Protocol):
@@ -579,14 +582,25 @@ class Win32EventLogBackend:
         return metadata
 
     def channel_info(self, channel: str) -> ChannelInfo:
+        return ChannelInfo(
+            oldest_record_id=self._edge_record_id(channel, newest=False),
+            newest_record_id=self._edge_record_id(channel, newest=True),
+        )
+
+    def _edge_record_id(self, channel: str, *, newest: bool) -> int | None:
+        """Record ID of the first or last event in a channel (one event, XML only)."""
         evt = self._evt
+        direction = evt.EvtQueryReverseDirection if newest else evt.EvtQueryForwardDirection
         try:
-            handle = evt.EvtOpenLog(channel, evt.EvtOpenChannelPath)
-            oldest = evt.EvtGetLogInfo(handle, evt.EvtLogOldestRecordNumber)[0]
-            count = evt.EvtGetLogInfo(handle, evt.EvtLogNumberOfLogRecords)[0]
+            handle = evt.EvtQuery(channel, evt.EvtQueryChannelPath | direction, "*")
+            batch = evt.EvtNext(handle, 1)
+            if not batch:
+                return None
+            xml = evt.EvtRender(batch[0], evt.EvtRenderEventXml)
         except self._error as exc:
             raise _translate_error(exc, channel) from None
-        return ChannelInfo(oldest_record_id=int(oldest) or None, record_count=int(count or 0))
+        match = _RECORD_ID.search(xml)
+        return int(match.group(1)) if match else None
 
     def notifier(self, channels: Sequence[str]) -> Notifier | None:
         try:

@@ -178,7 +178,7 @@ class FakeBackend:
     def channel_info(self, channel):
         events = self._events(channel)
         ids = [e[0] for e in events]
-        return ChannelInfo(min(ids) if ids else None, len(ids))
+        return ChannelInfo(min(ids, default=None), max(ids, default=None))
 
     def notifier(self, channels):
         return None

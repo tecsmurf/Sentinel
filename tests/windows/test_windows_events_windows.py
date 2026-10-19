@@ -27,11 +27,16 @@ def backend():
     return create_backend()
 
 
-def test_channel_info_for_application_log(backend):
+def test_channel_info_matches_the_actual_newest_event(backend):
+    # Regression: "newest" was computed as oldest + count - 1, which is wrong when record
+    # numbers are not contiguous (as on GitHub's Windows runners) and looked like a cleared log.
     info = backend.channel_info("Application")
-    assert info.record_count >= 0
-    if info.record_count:
-        assert info.newest_record_id >= info.oldest_record_id
+    (latest,) = backend.query(EventQuery("Application", max_events=1, newest_first=True)) or (None,)
+    if latest is None:
+        assert info.newest_record_id is None
+        return
+    assert info.newest_record_id == int(normalize_event(latest, "Application").record_id)
+    assert info.oldest_record_id <= info.newest_record_id
 
 
 def test_recent_events_render_and_normalise(backend):

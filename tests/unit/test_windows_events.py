@@ -65,8 +65,8 @@ class TestQueryAndTime:
         assert parse_system_time(text) is None
 
     def test_channel_info_newest(self):
-        assert ChannelInfo(100, 5).newest_record_id == 104
-        assert ChannelInfo(None, 0).newest_record_id is None
+        assert ChannelInfo(100, 104).newest_record_id == 104
+        assert ChannelInfo(None, None).newest_record_id is None
 
 
 def _event(**kwargs) -> RawEvent:
@@ -349,3 +349,18 @@ class TestCollector:
 
     def test_disabled_collection(self):
         assert collector(FakeBackend(), enabled=False).poll({}) == []
+
+
+def test_non_contiguous_record_numbers_are_not_mistaken_for_a_cleared_log():
+    # Regression (GitHub Windows runners): record IDs with holes must not trigger a re-read.
+    backend = FakeBackend()
+    for rid in (100, 101, 250, 251, 900):
+        backend.add("Application", rid)
+    checkpoints = {}
+    col = collector(backend)
+    first = run(col, checkpoints)
+    assert record_ids(first) == [100, 101, 250, 251, 900]
+    backend.add("Application", 901)
+    second = run(col, checkpoints)
+    assert record_ids(second) == [901]
+    assert "log_cleared" not in kinds(second)
